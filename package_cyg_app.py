@@ -45,6 +45,7 @@ import sys
 import tarfile
 from argparse import ArgumentDefaultsHelpFormatter, ArgumentParser
 from dataclasses import dataclass, field
+from difflib import get_close_matches
 from hashlib import sha256, sha512
 from os import listdir, makedirs
 from os import name as os_name
@@ -58,7 +59,7 @@ from urllib.error import HTTPError
 from urllib.parse import urljoin, urlsplit
 
 __AUTHOR__ = "Jacob Allen"
-__VERSION__ = "1.0.0"
+__VERSION__ = "1.1.0"
 
 ZST_SUPPORTED = False
 try:
@@ -333,6 +334,20 @@ class PackageDatabase:
 
         start, end = self._package_bounds[package_name]
         return Package.from_lines(self._data[start:end])
+
+    def find_similar_packages(self, package_name: str) -> Iterable[str]:
+        """Find packages that sound similar to the specified package."""
+        similar_words: List[str] = []
+        for package in self._package_bounds:
+            if package.startswith(package_name):
+                similar_words.insert(0, package)
+            elif package.endswith(package_name):
+                similar_words.append(package)
+        similar_words += get_close_matches(package_name, self._package_bounds, n=5)
+        results: Set[str] = set()
+        while len(results) < 5 and similar_words:
+            results.add(similar_words.pop(0))
+        return sorted(results)
 
 
 T = TypeVar("T")
@@ -706,6 +721,9 @@ def main() -> int:
 
     if package_database.get_package(target_package) is None:
         print(f"Package '{target_package}' does not exist.")
+        print("Similar package names:")
+        for package in package_database.find_similar_packages(target_package):
+            print("  ->", package)
         return 2
 
     requirements = find_requirements_for_package(target_package, package_database)
