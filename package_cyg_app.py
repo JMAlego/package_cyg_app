@@ -172,7 +172,7 @@ class PackageVersion:
     """Represents a particular version of a package."""
 
     version: str
-    source: str
+    source: Optional[str] = None
     install: Optional[str] = None
     depends2: List[str] = field(default_factory=list)
     build_depends: List[str] = field(default_factory=list)
@@ -189,7 +189,8 @@ class PackageVersion:
     def from_dict(version_dict: Dict[str, str]) -> PackageVersion:
         """Build a PackageVersion from a data dict."""
         return PackageVersion(
-            version_dict["version"].strip(), version_dict["source"].strip(),
+            version_dict["version"].strip(),
+            version_dict["source"].strip() if "source" in version_dict else None,
             version_dict["install"].strip() if "install" in version_dict else None,
             [x.strip()
              for x in version_dict["depends2"].split(",")] if "depends2" in version_dict else [],
@@ -542,7 +543,7 @@ def find_requirements_for_package(target_package: str,
     return requirements
 
 
-def download_and_extract_packages(target_package: str,
+def download_and_extract_packages(target_packages: List[str],
                                   destination_path: str,
                                   cyg_usr_bin_path: str,
                                   requirements: Iterable[str],
@@ -550,7 +551,7 @@ def download_and_extract_packages(target_package: str,
                                   cache: CachingService,
                                   debug: bool = False):
     """Download and extract a target package and it's requirements."""
-    files_to_shim = set()
+    files_to_shim: Set[str] = set()
 
     with Spinner("Downloading and extracting...", debug=debug) as spinner:
         for requirement in requirements:
@@ -587,14 +588,14 @@ def download_and_extract_packages(target_package: str,
                     print(f"Could not find working version of {requirement}!")
                 continue
 
-            if requirement == target_package:
+            if requirement in target_packages:
                 bin_before = set(listdir(cyg_usr_bin_path))
 
             decompress_file(downloaded_file, destination_path, debug=debug)
 
-            if requirement == target_package:
+            if requirement in target_packages:
                 bin_after = set(listdir(cyg_usr_bin_path))
-                files_to_shim = set(
+                files_to_shim.update(
                     filter(lambda x: x.endswith(EXEC_EXT), bin_after.difference(bin_before)))
 
     return files_to_shim
@@ -772,8 +773,9 @@ def main() -> int:
         makedirs(cyg_home_path)
         makedirs(cyg_temp_path)
 
-        files_to_shim = download_and_extract_packages(target_package, working_dir, cyg_usr_bin_path,
-                                                      requirements, package_database, cache, debug)
+        files_to_shim = download_and_extract_packages(extra_packages + [target_package],
+                                                      working_dir, cyg_usr_bin_path, requirements,
+                                                      package_database, cache, debug)
 
         fix_bin_and_lib_for_cygwin(cyg_bin_path, cyg_usr_bin_path, cyg_lib_path, cyg_usr_lib_path,
                                    debug)
