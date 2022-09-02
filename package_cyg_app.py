@@ -59,7 +59,7 @@ from urllib.error import HTTPError
 from urllib.parse import urljoin, urlsplit
 
 __AUTHOR__ = "Jacob Allen"
-__VERSION__ = "1.1.0"
+__VERSION__ = "1.2.0"
 
 ZST_SUPPORTED = False
 try:
@@ -335,17 +335,17 @@ class PackageDatabase:
         start, end = self._package_bounds[package_name]
         return Package.from_lines(self._data[start:end])
 
-    def find_similar_packages(self, package_name: str) -> Iterable[str]:
+    def find_similar_packages(self, package_name: str, limit: int = 5) -> Iterable[str]:
         """Find packages that sound similar to the specified package."""
         similar_words: List[str] = []
-        for package in self._package_bounds:
+        for package in sorted(self._package_bounds, reverse=True):
             if package.startswith(package_name):
                 similar_words.insert(0, package)
             elif package.endswith(package_name):
                 similar_words.append(package)
-        similar_words += get_close_matches(package_name, self._package_bounds, n=5)
+        similar_words += get_close_matches(package_name, self._package_bounds, n=limit)
         results: Set[str] = set()
-        while len(results) < 5 and similar_words:
+        while len(results) < limit and similar_words:
             results.add(similar_words.pop(0))
         return sorted(results)
 
@@ -496,16 +496,19 @@ class Spinner:
 
 def find_requirements_for_package(target_package: str,
                                   package_database: PackageDatabase,
+                                  extra_packages: List[str],
                                   debug: bool = False):
     """Find requirements for a target package."""
     packages_to_process: OrderedSet[str] = OrderedSet()
     packages_to_process.add(target_package)
+    packages_to_process.add_all(extra_packages)
 
     requirements: Set[str] = set()
     exclude_packages: Set[str] = set()
     processed_packages: Set[str] = set()
 
     requirements.add(target_package)
+    requirements.update(extra_packages)
 
     with Spinner("Getting requirements...", debug=debug) as spinner:
         while not packages_to_process.is_empty():
@@ -683,6 +686,13 @@ def main() -> int:
                                  "--mirror",
                                  default=DEFAULT_MIRROR,
                                  help="cygwin package mirror to use")
+    argument_parser.add_argument("-e", "--extra", nargs="*", help="extra packages to include")
+    argument_parser.add_argument("-f", "--find", action="store_true", help="find packages by name")
+    argument_parser.add_argument("-n",
+                                 "--find-limit",
+                                 type=int,
+                                 default=50,
+                                 help="limit of packages to show with a find")
     argument_parser.add_argument("-d",
                                  "--list-dependencies",
                                  "--list-deps",
@@ -696,6 +706,9 @@ def main() -> int:
     target_architecture: Architecture = parsed_arguments.arch
     list_dependencies: bool = parsed_arguments.list_dependencies
     output_path: str = parsed_arguments.output
+    find_package: str = parsed_arguments.find
+    find_limit: int = parsed_arguments.find_limit
+    extra_packages: List[str] = parsed_arguments.extra if parsed_arguments.extra is not None else []
 
     output_file_name = f"{target_package}.tar.gz"
     output_directory_path = "./"
@@ -719,14 +732,24 @@ def main() -> int:
 
     print("Done")
 
+    if find_package:
+        print(f"Finding packages like '{target_package}'.")
+        print("Results:")
+        for package in package_database.find_similar_packages(target_package, limit=find_limit):
+            print("  ->", package)
+        return 0
+
     if package_database.get_package(target_package) is None:
         print(f"Package '{target_package}' does not exist.")
         print("Similar package names:")
-        for package in package_database.find_similar_packages(target_package):
+        for package in package_database.find_similar_packages(target_package, limit=5):
             print("  ->", package)
         return 2
 
-    requirements = find_requirements_for_package(target_package, package_database)
+    requirements = find_requirements_for_package(target_package,
+                                                 package_database,
+                                                 extra_packages=extra_packages,
+                                                 debug=debug)
 
     if list_dependencies:
         print("Dependencies:")
